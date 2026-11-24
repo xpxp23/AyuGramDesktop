@@ -1,0 +1,30 @@
+using "ui/basic.style";
+using "ui/colors.palette";
+using "ui/widgets/widgets.style";
+using "info/info.style";
+
+smartFilterBarHeight: 38px;
+smartFilterBarPadding: margins(12px, 4px, 12px, 4px);
+smartFilterBarItemSpacing: 8px;
+smartFilterBarThresholdWidth: 72px;
+
+smartFilterBarLabel: FlatLabel(defaultFlatLabel) {
+	textFg: windowSubTextFg;
+	style: TextStyle(defaultTextStyle) {
+		font: font(12px);
+	}
+}
+
+smartFilterBarButton: RoundButton(defaultActiveButton) {
+	height: 26px;
+	textTop: 4px;
+	style: TextStyle(defaultTextStyle) {
+		font: font(12px semibold);
+	}
+}
+
+topBarSmartFilter: IconButton(topBarSearch) {
+	icon: icon {{ "menu/tag_filter", menuIconFg }};
+	iconOver: icon {{ "menu/tag_filter", menuIconFgOver }};
+	iconPosition: point(8px, 15px);
+}

@@ -85,6 +85,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 // AyuGram includes
 #include "ayu/ayu_settings.h"
 #include "ayu/features/filters/filters_controller.h"
+#include "ayu/features/filters/smart_filter_adapter.h"
 #include "ayu/features/message_shot/message_shot.h"
 #include "ayu/utils/telegram_helpers.h"
 #include "ui/emoji_config.h"
@@ -4931,7 +4932,9 @@ TextWithEntities HistoryItem::notificationText(
 }
 
 ItemPreview HistoryItem::toPreview(ToPreviewOptions options) const {
-	if (FiltersController::filtered(const_cast<HistoryItem*>(this))) {
+	if (FiltersController::filtered(
+			const_cast<HistoryItem*>(this),
+			!options.searchLowerText.isEmpty())) {
 		return {};
 	}
 
@@ -5463,6 +5466,7 @@ void HistoryItem::updateReactions(const MTPMessageReactions *reactions) {
 	}
 	CheckReactionNotificationSchedule(this, wasRecentUsers);
 	_history->owner().notifyItemDataChange(this);
+	Ayu::SmartFilter::handleHistoryItemReactionsUpdated(this);
 }
 
 bool HistoryItem::changeReactions(const MTPMessageReactions *reactions) {

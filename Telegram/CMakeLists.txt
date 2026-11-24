@@ -247,6 +247,16 @@ set(ayugram_files
         ayu/features/filters/filters_cache_controller.h
         ayu/features/filters/filters_utils.cpp
         ayu/features/filters/filters_utils.h
+        ayu/features/filters/smart_filter_config.h
+        ayu/features/filters/smart_filter_config.cpp
+        ayu/features/filters/smart_filter_engine.h
+        ayu/features/filters/smart_filter_engine.cpp
+        ayu/features/filters/smart_filter_adapter.h
+        ayu/features/filters/smart_filter_adapter.cpp
+        ayu/features/filters/smart_filter_backfill.h
+        ayu/features/filters/smart_filter_backfill.cpp
+        ayu/ui/widgets/smart_filter_bar.h
+        ayu/ui/widgets/smart_filter_bar.cpp
         ayu/data/messages_storage.cpp
         ayu/data/messages_storage.h
         ayu/data/entities.h

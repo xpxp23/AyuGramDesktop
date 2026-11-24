@@ -129,6 +129,7 @@ public:
 		return _chooseFromUserRequests.events();
 	}
 	[[nodiscard]] rpl::producer<> searchRequest() const;
+	[[nodiscard]] rpl::producer<> smartFilterToggleRequest() const;
 
 	void setGeometryWithNarrowRatio(
 		QRect geometry,
@@ -262,6 +263,7 @@ private:
 	object_ptr<Ui::IconButton> _menuToggle;
 	object_ptr<Ui::IconButton> _recentActions;
 	object_ptr<Ui::IconButton> _admins;
+	object_ptr<Ui::IconButton> _smartFilter;
 	base::unique_qptr<Ui::PopupMenu> _menu;
 	base::weak_qptr<Ui::IconButton> _menuButton;
 

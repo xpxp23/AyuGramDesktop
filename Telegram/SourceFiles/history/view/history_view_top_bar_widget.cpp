@@ -79,6 +79,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/admin_log/history_admin_log_section.h"
 #include "styles/style_ayu_styles.h"
 #include "styles/style_ayu_icons.h"
+#include "styles/style_ayu_smart_filter.h"
 
 
 namespace HistoryView {
@@ -140,6 +141,7 @@ TopBarWidget::TopBarWidget(
 , _menuToggle(this, st::topBarMenuToggle)
 , _recentActions(this, st::topBarRecentActions)
 , _admins(this, st::topBarAdmins)
+, _smartFilter(this, st::topBarSmartFilter)
 , _titlePeerText(st::windowMinWidth / 3)
 , _onlineUpdater([=] { updateOnlineDisplay(); }) {
 	setAttribute(Qt::WA_OpaquePaintEvent);
@@ -296,6 +298,7 @@ TopBarWidget::TopBarWidget(
 	_call->setAccessibleName(tr::lng_profile_action_short_call(tr::now));
 	_groupCall->setAccessibleName(tr::lng_group_call_title(tr::now));
 	_search->setAccessibleName(tr::lng_shortcuts_search(tr::now));
+	_smartFilter->setAccessibleName(u"智能筛选栏"_q);
 	_infoToggle->setAccessibleName(tr::lng_settings_section_info(tr::now));
 	_menuToggle->setAccessibleName(tr::lng_chat_menu(tr::now));
 	_back->setAccessibleName(tr::lng_go_back(tr::now));
@@ -369,6 +372,10 @@ void TopBarWidget::clearChooseMessagesForReport() {
 
 rpl::producer<> TopBarWidget::searchRequest() const {
 	return _search->clicks() | rpl::to_empty;
+}
+
+rpl::producer<> TopBarWidget::smartFilterToggleRequest() const {
+	return _smartFilter->clicks() | rpl::to_empty;
 }
 
 void TopBarWidget::setChooseForReportReason(
@@ -1337,6 +1344,10 @@ void TopBarWidget::updateControlsGeometry() {
 	if (!_admins->isHidden()) {
 		_rightTaken += _admins->width();
 	}
+	_smartFilter->moveToRight(_rightTaken, otherButtonsTop);
+	if (!_smartFilter->isHidden()) {
+		_rightTaken += _smartFilter->width();
+	}
 
 	_search->moveToRight(_rightTaken, otherButtonsTop);
 	if (!_search->isHidden()) {
@@ -1495,6 +1506,9 @@ void TopBarWidget::updateControlsVisibility() {
 		return false;
 	}();
 	_admins->setVisible(showAdmins);
+	_smartFilter->setVisible(historyMode
+		&& _activeChat.key.peer()
+		&& !_chooseForReportReason);
 
 	const auto callsEnabled = [&] {
 		if (const auto peer = _activeChat.key.peer()) {

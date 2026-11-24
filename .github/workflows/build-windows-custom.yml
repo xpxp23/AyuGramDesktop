@@ -1,0 +1,176 @@
+name: Build AyuGram Windows Portable (SmartFilter + No AutoUpdate)
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_config:
+        description: "CMake build configuration"
+        required: true
+        default: "Release"
+        type: choice
+        options:
+          - Release
+          - Debug
+  push:
+    tags:
+      - "v*-smartfilter*"
+
+concurrency:
+  group: win64-smartfilter-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-win64:
+    runs-on: windows-2022
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: pwsh
+
+    env:
+      ARCH: x64
+
+    steps:
+      - name: Clean up preinstalled software to free disk space
+        run: |
+          $before = (Get-PSDrive C).Free / 1GB
+          Get-Service docker -ErrorAction SilentlyContinue | Stop-Service -ErrorAction SilentlyContinue
+          wsl --shutdown 2> $null
+          Remove-Item "C:\Android\android-sdk", "C:\Program Files\dotnet", "C:\Miniconda", "C:\msys64", "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup", "$env:LOCALAPPDATA\Docker", "C:\ProgramData\DockerDesktop", "C:\Program Files\PostgreSQL", "C:\PostgreSQL", "C:\Program Files\MongoDB", "C:\Program Files\MySQL" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item "C:\ghcup", "C:\cabal", "C:\Program Files\LLVM", "C:\vcpkg", "C:\tools\kotlinc", "C:\tools\php", "C:\tools\Apache24", "C:\tools\nginx-*", "C:\selenium", "C:\SeleniumWebDrivers", "C:\Program Files\R", "C:\Program Files (x86)\R", "C:\rtools*", "C:\Program Files\Google\Chrome*", "C:\Program Files (x86)\Google\Chrome*", "C:\Program Files\Mozilla Firefox*", "C:\ProgramData\Package Cache" -Recurse -Force -ErrorAction SilentlyContinue
+          Get-ChildItem "C:\ProgramData\Microsoft\VisualStudio\Packages" -Exclude _Instances -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item C:\hostedtoolcache\windows\Go*, C:\hostedtoolcache\windows\Ruby*, C:\hostedtoolcache\windows\PyPy*, C:\hostedtoolcache\windows\Java_*, C:\hostedtoolcache\windows\NuGet* -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host ('C: {0:N1} GB -> {1:N1} GB free' -f $before, ((Get-PSDrive C).Free / 1GB))
+          exit 0
+
+      - name: Prepare build directories
+        shell: cmd
+        run: |
+          if not exist "%userprofile%\TBuild\Libraries\win64" mkdir "%userprofile%\TBuild\Libraries\win64"
+          if not exist "%userprofile%\TBuild\ThirdParty" mkdir "%userprofile%\TBuild\ThirdParty"
+          if not exist "%GITHUB_WORKSPACE%\TBuild" mklink /d "%GITHUB_WORKSPACE%\TBuild" "%userprofile%\TBuild"
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+
+      - name: Checkout Fork with Submodules
+        uses: actions/checkout@v4
+        with:
+          path: TBuild\tdesktop
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Validate Telegram API Secrets
+        run: |
+          if ([string]::IsNullOrWhiteSpace("${{ secrets.TDESKTOP_API_ID }}") -or [string]::IsNullOrWhiteSpace("${{ secrets.TDESKTOP_API_HASH }}")) {
+            Write-Error "Missing Repository Secrets: TDESKTOP_API_ID and TDESKTOP_API_HASH. Obtain them from https://my.telegram.org and add them in Settings -> Secrets and variables -> Actions."
+            exit 1
+          }
+
+      - name: Compute dependency cache key
+        run: |
+          $h1 = (Get-FileHash "$env:TBUILD\tdesktop\Telegram\build\prepare\win.bat" -Algorithm SHA256).Hash
+          $h2 = (Get-FileHash "$env:TBUILD\tdesktop\Telegram\build\prepare\prepare.py" -Algorithm SHA256).Hash
+          $h3 = (Get-FileHash "$env:TBUILD\tdesktop\Telegram\build\qt_version.py" -Algorithm SHA256).Hash
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes("$h1-$h2-$h3")
+          $sha = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)).Replace("-", "").ToLower()
+          "CACHE_KEY=$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Setup Visual Studio 2022 x64 Environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Run SmartFilter C++20 Unit Tests
+        working-directory: ${{ env.TBUILD }}\tdesktop
+        shell: cmd
+        run: |
+          cl /nologo /std:c++20 /EHsc /utf-8 /I Telegram\SourceFiles tests\test_smart_filter_engine.cpp Telegram\SourceFiles\ayu\features\filters\smart_filter_config.cpp Telegram\SourceFiles\ayu\features\filters\smart_filter_engine.cpp Telegram\SourceFiles\ayu\features\filters\smart_filter_backfill.cpp /Fe:test_smart_filter.exe || exit /b 1
+          test_smart_filter.exe || exit /b 1
+          del test_smart_filter.exe *.obj
+
+      - name: Configure NuGet online source
+        shell: cmd
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      - name: Cache ThirdParty tools
+        id: cache-third-party
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: win64-third-party-${{ env.CACHE_KEY }}
+          restore-keys: |
+            win64-third-party-
+
+      - name: Cache Prebuilt Windows Libraries
+        id: cache-libs
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TBUILD }}\Libraries\win64
+          key: win64-libs-${{ inputs.build_config || 'Release' }}-${{ env.CACHE_KEY }}
+          restore-keys: |
+            win64-libs-${{ inputs.build_config || 'Release' }}-
+            win64-libs-
+
+      - name: Prepare Dependencies
+        working-directory: ${{ env.TBUILD }}\tdesktop
+        shell: cmd
+        run: |
+          set CARGO_INCREMENTAL=0
+          if "${{ inputs.build_config || 'Release' }}"=="Debug" (
+            call Telegram\build\prepare\win.bat skip-release silent
+          ) else (
+            call Telegram\build\prepare\win.bat silent
+          )
+
+      - name: Prune intermediate build objects before caching
+        run: |
+          Get-ChildItem -Path "$env:TBUILD\Libraries\win64" -Include *.obj,*.o,*.pch,*.idb,*.tlog,*.ilk -Recurse -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+
+      - name: Configure CMake (Disable AutoUpdate & Crash Reports)
+        working-directory: ${{ env.TBUILD }}\tdesktop\Telegram
+        shell: cmd
+        run: |
+          set "CFG=${{ inputs.build_config || 'Release' }}"
+          call configure.bat x64 -D TDESKTOP_API_ID=${{ secrets.TDESKTOP_API_ID }} -D TDESKTOP_API_HASH=${{ secrets.TDESKTOP_API_HASH }} -D CMAKE_CONFIGURATION_TYPES=%CFG% -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
+
+      - name: Build AyuGram (${{ inputs.build_config || 'Release' }})
+        working-directory: ${{ env.TBUILD }}\tdesktop
+        run: |
+          $cfg = "${{ inputs.build_config || 'Release' }}"
+          cmake --build out --config $cfg --target Telegram --parallel
+
+      - name: Package Portable Windows Archive
+        working-directory: ${{ env.TBUILD }}\tdesktop
+        run: |
+          $cfg = "${{ inputs.build_config || 'Release' }}"
+          $outDir = "out\$cfg"
+          $stageDir = "$env:TBUILD\portable_stage"
+          if (Test-Path $stageDir) { Remove-Item -Recurse -Force $stageDir }
+          New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
+          if (Test-Path "$outDir\AyuGram.exe") {
+            Copy-Item "$outDir\AyuGram.exe" "$stageDir\AyuGram.exe"
+          } elseif (Test-Path "$outDir\Telegram.exe") {
+            Copy-Item "$outDir\Telegram.exe" "$stageDir\AyuGram.exe"
+          } else {
+            Write-Error "Built executable not found in $outDir"
+            Get-ChildItem $outDir
+            exit 1
+          }
+          Get-ChildItem -Path $outDir -Filter "*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName "$stageDir\$($_.Name)"
+          }
+          if (Test-Path "$outDir\modules") {
+            Copy-Item -Recurse "$outDir\modules" "$stageDir\modules"
+          }
+          if (Test-Path "config\ayu_smart_filter.example.json") {
+            Copy-Item "config\ayu_smart_filter.example.json" "$stageDir\ayu_smart_filter.example.json"
+          }
+          Compress-Archive -Path "$stageDir\*" -DestinationPath "$env:GITHUB_WORKSPACE\AyuGram-SmartFilter-win64-portable.zip" -Force
+
+      - name: Upload Portable Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AyuGram-SmartFilter-win64-portable
+          path: ${{ github.workspace }}/AyuGram-SmartFilter-win64-portable.zip
+          retention-days: 30

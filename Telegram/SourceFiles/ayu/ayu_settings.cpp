@@ -6,6 +6,8 @@
 // Copyright @Radolyn, 2026
 #include "ayu/ayu_settings.h"
 
+#include "ayu/features/filters/smart_filter_config.h"
+#include "ayu/features/filters/smart_filter_engine.h"
 #include "lang_auto.h"
 #include "tray.h"
 #include "ayu/ayu_ui_settings.h"
@@ -30,6 +32,10 @@ namespace {
 
 std::string getSettingsPath() {
 	return (cWorkingDir() + u"tdata/ayu_settings.json"_q).toStdString();
+}
+
+std::string getSmartFilterPath() {
+	return (cWorkingDir() + u"tdata/ayu_smart_filter.json"_q).toStdString();
 }
 
 void repaintApp() {
@@ -364,7 +370,31 @@ AyuSettings &AyuSettings::getInstance() {
 	return instance;
 }
 
+void initSmartFilter() {
+	const auto smartFilterPath = getSmartFilterPath();
+	auto &engine = Ayu::SmartFilter::SmartFilterEngine::instance();
+	if (auto loaded = Ayu::SmartFilter::loadConfigFromFile(smartFilterPath)) {
+		engine.setConfig(std::move(*loaded));
+	}
+	const auto lastSaved = std::make_shared<std::string>(
+		Ayu::SmartFilter::serializeConfigToJson(engine.config()));
+	engine.setOnChangeCallback([smartFilterPath, lastSaved](int64_t /*chatId*/) {
+		const auto cfg = Ayu::SmartFilter::SmartFilterEngine::instance().config();
+		const auto serialized = Ayu::SmartFilter::serializeConfigToJson(cfg);
+		if (*lastSaved != serialized) {
+			*lastSaved = serialized;
+			Ayu::SmartFilter::saveConfigToFile(smartFilterPath, cfg);
+		}
+		crl::on_main([] {
+			FiltersCacheController::fireUpdate();
+			repaintApp();
+		});
+	});
+}
+
 void AyuSettings::load() {
+	initSmartFilter();
+
 	std::ifstream file(getSettingsPath());
 	if (!file.good()) {
 		return;
@@ -424,6 +454,10 @@ void AyuSettings::save() {
 	file.open(getSettingsPath());
 	file << p.dump(4);
 	file.close();
+
+	Ayu::SmartFilter::saveConfigToFile(
+		getSmartFilterPath(),
+		Ayu::SmartFilter::SmartFilterEngine::instance().config());
 }
 
 void AyuSettings::reset() {

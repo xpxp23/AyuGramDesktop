@@ -220,6 +220,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 // AyuGram includes
 #include "ayu/ayu_settings.h"
 #include "ayu/features/filters/filters_cache_controller.h"
+#include "ayu/features/filters/smart_filter_engine.h"
+#include "ayu/ui/widgets/smart_filter_bar.h"
 #include "ayu/utils/telegram_helpers.h"
 #include "ayu/features/message_shot/message_shot.h"
 #include "ayu/features/forward/ayu_forward.h"
@@ -404,6 +406,7 @@ HistoryWidget::HistoryWidget(
 	_topBar->setVisualTabOrder(true);
 	_topBars->setVisualTabOrder(true);
 	_muteUnmute->setVisualTabOrder(true);
+	initSmartFilterBar();
 
 	session().downloaderTaskFinished() | rpl::on_next([=] {
 		update();
@@ -836,6 +839,11 @@ HistoryWidget::HistoryWidget(
 								_history->owner().requestItemViewRefresh(msg->data());
 							}
 						}
+						if (_smartFilterBar) {
+							_smartFilterBar->refreshStats();
+						}
+						updateSmartFilterBarVisibility();
+						evaluateSmartFilterBackfill(false);
 					}
 				});
 		},
@@ -1241,6 +1249,11 @@ HistoryWidget::HistoryWidget(
 		if (_history) {
 			controller->searchInChat(_history);
 		}
+	}, _topBar->lifetime());
+	_topBar->smartFilterToggleRequest(
+	) | rpl::on_next([=] {
+		_smartFilterBarManualShown = !_smartFilterBarManualShown;
+		updateSmartFilterBarVisibility();
 	}, _topBar->lifetime());
 
 	session().api().sendActions(
@@ -3320,6 +3333,12 @@ void HistoryWidget::showHistory(
 		setHistory(nullptr);
 		_list = nullptr;
 		_peer = nullptr;
+		_smartFilterBarManualShown = false;
+		if (_smartFilterBar) {
+			_smartFilterBar->setActiveChat(0);
+		}
+		_smartFilterBackfill.onChatSwitched(0);
+		updateSmartFilterBarVisibility();
 		_suggestOptions = nullptr;
 		_sendPayment.clear();
 		_topicsRequested.clear();
@@ -3441,6 +3460,14 @@ void HistoryWidget::showHistory(
 		}
 		refreshTopBarActiveChat();
 		updateTopBarSelection();
+
+		_smartFilterBarManualShown = false;
+		const auto smartFilterChatId = static_cast<int64_t>(_peer->id.value);
+		if (_smartFilterBar) {
+			_smartFilterBar->setActiveChat(smartFilterChatId);
+		}
+		_smartFilterBackfill.onChatSwitched(smartFilterChatId);
+		updateSmartFilterBarVisibility();
 
 		if (_peer->isChannel()) {
 			updateNotifyControls();
@@ -4225,6 +4252,7 @@ void HistoryWidget::updateControlsVisibility() {
 	if (_businessBotStatus) {
 		_businessBotStatus->show();
 	}
+	updateSmartFilterBarVisibility();
 	if (_subsectionTabs) {
 		_subsectionTabs->show();
 	}
@@ -4783,6 +4811,7 @@ void HistoryWidget::messagesFailed(const MTP::Error &error, int requestId) {
 
 	if (_preloadRequest == requestId) {
 		_preloadRequest = 0;
+		_smartFilterBackfill.onFetchCompleted(0, true);
 	} else if (_preloadDownRequest == requestId) {
 		_preloadDownRequest = 0;
 	} else if (_firstLoadRequest == requestId) {
@@ -4858,6 +4887,7 @@ void HistoryWidget::messagesReceived(
 	if (_preloadRequest == requestId) {
 		addMessagesToFront(peer, *histList);
 		_preloadRequest = 0;
+		evaluateSmartFilterBackfill(true);
 		preloadHistoryIfNeeded();
 	} else if (_preloadDownRequest == requestId) {
 		addMessagesToBack(peer, *histList);
@@ -5300,6 +5330,7 @@ void HistoryWidget::handleScroll() {
 	if (scrollTop != _lastScrollTop) {
 		if (!_synteticScrollEvent) {
 			checkLastPinnedClickedIdReset(_lastScrollTop, scrollTop);
+			_smartFilterBackfill.onUserManualScroll();
 		}
 		_lastScrolled = now;
 		_lastScrollTop = scrollTop;
@@ -8316,7 +8347,15 @@ void HistoryWidget::updateControlsGeometry() {
 
 	_topBars->move(tabsLeftSkip, _topBar->bottomNoMargins()
 		+ (_subsectionTabs ? _subsectionTabs->topSkip() : 0));
-	const auto groupCallTop = 0;
+	const auto smartFilterBarTop = 0;
+	if (_smartFilterBar) {
+		_smartFilterBar->move(0, smartFilterBarTop);
+		_smartFilterBar->resizeToWidth(innerWidth);
+	}
+	const auto groupCallTop = smartFilterBarTop
+		+ ((_smartFilterBar && !_smartFilterBar->isHidden())
+			? _smartFilterBar->height()
+			: 0);
 	if (_groupCallBar) {
 		_groupCallBar->move(0, groupCallTop);
 		_groupCallBar->resizeToWidth(innerWidth);
@@ -8651,6 +8690,9 @@ void HistoryWidget::updateHistoryGeometry(
 	if (_businessBotStatus) {
 		newScrollHeight -= _businessBotStatus->bar().height();
 	}
+	if (_smartFilterBar && !_smartFilterBar->isHidden()) {
+		newScrollHeight -= _smartFilterBar->height();
+	}
 	if (isChoosingTheme()) {
 		newScrollHeight -= _chooseTheme->height();
 	} else if (!editingMessage()
@@ -8763,6 +8805,7 @@ void HistoryWidget::updateHistoryGeometry(
 			}
 		}
 	}
+	evaluateSmartFilterBackfill(false);
 }
 
 void HistoryWidget::revealItemsCallback() {
@@ -11704,6 +11747,100 @@ void HistoryWidget::synteticScrollToY(int y) {
 		_scroll->scrollToY(y);
 	}
 	_synteticScrollEvent = false;
+}
+
+void HistoryWidget::initSmartFilterBar() {
+	_smartFilterBar = object_ptr<Ayu::SmartFilter::SmartFilterBar>(_topBars.get());
+	_smartFilterBar->hide();
+	_smartFilterBackfill.setCallbacks(
+		[=] {
+			loadMessages();
+		},
+		[=](bool capReached) {
+			if (_smartFilterBar) {
+				_smartFilterBar->setBackfillCapReached(capReached);
+				updateControlsGeometry();
+			}
+		});
+	_smartFilterBar->setOnFilterToggled([=] {
+		updateSmartFilterBarVisibility();
+		evaluateSmartFilterBackfill(false);
+	});
+	_smartFilterBar->setOnManualLoadOlder([=] {
+		_smartFilterBackfill.onManualContinueClicked();
+	});
+}
+
+void HistoryWidget::updateSmartFilterBarVisibility() {
+	if (!_smartFilterBar) {
+		return;
+	}
+	const auto rawId = _peer ? static_cast<int64_t>(_peer->id.value) : 0;
+	const auto enabled = rawId != 0
+		&& Ayu::SmartFilter::SmartFilterEngine::instance().chatReactionConfig(rawId).enabled;
+	const auto shouldShow = (_history != nullptr)
+		&& !_showAnimation
+		&& (enabled || _smartFilterBarManualShown);
+	if (_smartFilterBar->isHidden() == shouldShow) {
+		_smartFilterBar->setVisible(shouldShow);
+		updateControlsGeometry();
+		if (_history && _historyInited) {
+			updateHistoryGeometry();
+		}
+	}
+	if (shouldShow) {
+		_smartFilterBar->refreshStats();
+	}
+}
+
+void HistoryWidget::evaluateSmartFilterBackfill(bool fromFetch) {
+	if (!_peer || !_history || !_list || _firstLoadRequest || _delayedShowAtRequest) {
+		return;
+	}
+	if (!fromFetch && _preloadRequest) {
+		return;
+	}
+	const auto rawId = static_cast<int64_t>(_peer->id.value);
+	auto &engine = Ayu::SmartFilter::SmartFilterEngine::instance();
+	const auto rcfg = engine.chatReactionConfig(rawId);
+	if (!rcfg.enabled || engine.isTemporaryRevealAll(rawId)) {
+		if (_smartFilterBar) {
+			_smartFilterBar->setBackfillCapReached(false);
+		}
+		return;
+	}
+	const auto cfg = engine.config();
+	_smartFilterBackfill.setLimits(cfg.minVisibleItems, cfg.maxBackfillPages);
+
+	int visibleCount = 0;
+	const auto countVisible = [&](History *hist) {
+		if (!hist) {
+			return;
+		}
+		for (const auto &block : hist->blocks) {
+			if (!block) {
+				continue;
+			}
+			for (const auto &element : block->messages) {
+				if (element && !element->isHidden()) {
+					++visibleCount;
+				}
+			}
+		}
+	};
+	countVisible(_history);
+	countVisible(_migrated);
+
+	const auto loadedAtTop = _history->loadedAtTop()
+		&& (!_migrated || _migrated->loadedAtTop());
+	if (fromFetch) {
+		_smartFilterBackfill.onFetchCompleted(visibleCount, loadedAtTop);
+	} else {
+		_smartFilterBackfill.onViewportEvaluated(visibleCount, loadedAtTop);
+	}
+	if (_smartFilterBar) {
+		_smartFilterBar->refreshStats();
+	}
 }
 
 HistoryWidget::~HistoryWidget() {

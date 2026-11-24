@@ -7,6 +7,7 @@
 
 #include "ayu/features/filters/filters_controller.h"
 
+#include "ayu/features/filters/smart_filter_adapter.h"
 #include "ayu/ayu_settings.h"
 #include "ayu/features/filters/filters_cache_controller.h"
 #include "ayu/features/filters/filters_utils.h"
@@ -149,7 +150,11 @@ bool isBlocked(const not_null<PeerData*> peer) {
 	);
 }
 
-bool filtered(const not_null<HistoryItem*> item) {
+bool filtered(const not_null<HistoryItem*> item, bool isSearch) {
+	if (Ayu::SmartFilter::shouldFilterHistoryItem(item, isSearch)) {
+		return true;
+	}
+
 	if (showingFilteredMessages.contains(item->history()->peer->id.value)) {
 		return false;
 	}

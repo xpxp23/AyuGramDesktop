@@ -15,6 +15,7 @@ set(ayugram_style_files
         ayu/ui/ayu_icons.style
         ayu/ui/ayu_styles.style
         ayu/ui/settings/ayu_settings.style
+        ayu/ui/widgets/ayu_smart_filter.style
 )
 
 set(style_files

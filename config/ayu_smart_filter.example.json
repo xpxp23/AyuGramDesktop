@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "ad_filter_enabled": true,
+  "hide_sponsored_messages": true,
+  "max_backfill_pages": 5,
+  "min_visible_items": 5,
+  "ad_whitelist_chat_ids": [],
+  "ad_rules": [
+    {
+      "id": "kw-promo-cn",
+      "enabled": true,
+      "type": "keyword",
+      "pattern": "#广告",
+      "case_sensitive": false,
+      "chat_id": null,
+      "note": "频道常见软广标签"
+    },
+    {
+      "id": "kw-sponsored-tag",
+      "enabled": true,
+      "type": "keyword",
+      "pattern": "商务合作",
+      "case_sensitive": false,
+      "chat_id": null,
+      "note": "常见接单推广话术"
+    },
+    {
+      "id": "regex-promo-cn",
+      "enabled": true,
+      "type": "regex",
+      "pattern": "(推广|赞助|返利|优惠码|邀请码|限时特惠|点击领取|私聊客服)",
+      "case_sensitive": false,
+      "chat_id": null,
+      "note": "中文软广高频正则规则"
+    },
+    {
+      "id": "domain-example",
+      "enabled": false,
+      "type": "domain",
+      "pattern": "promo-example.com",
+      "case_sensitive": false,
+      "chat_id": null,
+      "note": "示例域名黑名单（按需启用并替换为实际广告域名）"
+    },
+    {
+      "id": "channel-example",
+      "enabled": false,
+      "type": "channel",
+      "pattern": "@example_ad_channel",
+      "case_sensitive": false,
+      "chat_id": null,
+      "note": "示例广告导流频道（按需启用并替换为实际 @username）"
+    }
+  ],
+  "chat_reaction_configs": {
+    "-1001234567890": {
+      "enabled": true,
+      "min_reactions": 30,
+      "exempt_pinned": true,
+      "hide_service_messages": true
+    }
+  }
+}

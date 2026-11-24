@@ -20,10 +20,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "ui/widgets/fields/input_field.h"
 #include "mtproto/sender.h"
+#include "ayu/features/filters/smart_filter_backfill.h"
 
 enum class SendMediaType;
 class MessageLinksParser;
 struct InlineBotQuery;
+
+namespace Ayu::SmartFilter {
+class SmartFilterBar;
+} // namespace Ayu::SmartFilter
 
 namespace MTP {
 class Error;
@@ -733,6 +738,10 @@ private:
 	void showRichEditorWithPaste(std::shared_ptr<QMimeData> data);
 
 	void setHistory(History *history);
+
+	void initSmartFilterBar();
+	void updateSmartFilterBarVisibility();
+	void evaluateSmartFilterBackfill(bool fromFetch = false);
 	void setEditMsgId(MsgId msgId);
 
 	friend class HistoryInner;
@@ -874,6 +883,9 @@ private:
 	int _supportPreloadRequest = 0; // Not real mtpRequestId.
 
 	object_ptr<HistoryView::TopBarWidget> _topBar;
+	object_ptr<Ayu::SmartFilter::SmartFilterBar> _smartFilterBar = { nullptr };
+	Ayu::SmartFilter::SmartFilterBackfillController _smartFilterBackfill;
+	bool _smartFilterBarManualShown = false;
 	object_ptr<Ui::ElasticScroll> _scroll;
 	QPointer<HistoryInner> _list;
 	History *_migrated = nullptr;
